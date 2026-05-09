@@ -142,9 +142,15 @@ def run():
         avg = np.mean(recent_energies) if recent_energies else total
         is_beat = (total > avg * BEAT_THRESHOLD) and (total > BASS_FLOOR * 2)
 
-        # Smooth + map to power
-        smooth_bass = SMOOTHING * smooth_bass + (1 - SMOOTHING) * bass
-        smooth_mid  = SMOOTHING * smooth_mid  + (1 - SMOOTHING) * mid
+        # Smooth + map to power.
+        # If the raw frame is silent, snap smoothing to zero immediately
+        # so motors stop without the slow exponential decay tail.
+        if bass < BASS_FLOOR and mid < BASS_FLOOR * 0.5 and beat_hold == 0:
+            smooth_bass = 0.0
+            smooth_mid  = 0.0
+        else:
+            smooth_bass = SMOOTHING * smooth_bass + (1 - SMOOTHING) * bass
+            smooth_mid  = SMOOTHING * smooth_mid  + (1 - SMOOTHING) * mid
 
         power_a = _energy_to_power(smooth_bass, BASS_FLOOR)
         power_b = _energy_to_power(smooth_mid,  BASS_FLOOR * 0.5)
