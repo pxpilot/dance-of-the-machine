@@ -29,12 +29,21 @@ CHUNK_SIZE    = 2048        # ~46ms per frame
 SMOOTHING     = 0.7         # attack smoothing: 0=instant, 1=frozen (rise time)
 DECAY         = 0.05        # decay smoothing: lower = faster stop after sound ends (0.05 ≈ 2 frames)
 MOTOR_MAX     = 0.4         # max motor power (0.0–1.0)
-BASS_FLOOR    = 0.01        # silence threshold
 BEAT_THRESHOLD = 1.8        # onset energy multiplier to call a beat
 BEAT_HOLD_FRAMES = 6        # frames to sustain beat burst
 BASS_RANGE    = (40, 200)     # Hz — kick, bass guitar
 MID_RANGE     = (300, 2000)   # Hz — snare, chords, vocals
 MELODY_RANGE  = (1000, 8000)  # Hz — lead melody, synth, high strings
+
+# Per-band noise floor and amplification scale.
+# Raise BASS_FLOOR if motor A runs without sound (ambient noise / motor vibration pickup).
+# Lower MELODY_FLOOR / raise MELODY_SCALE if motor D doesn't respond.
+BASS_FLOOR    = 0.04   # ambient noise gate for bass — raise if A runs in silence
+MID_FLOOR     = 0.02   # ambient noise gate for mid
+MELODY_FLOOR  = 0.005  # melody has much lower raw energy — needs a lower threshold
+BASS_SCALE    = 3.0    # amplification after the floor
+MID_SCALE     = 3.0
+MELODY_SCALE  = 10.0   # boost melody signal to compensate for lower HF energy
 
 # Per-motor signal override. Keys are port letters; values are "bass", "mid", or "melody".
 # Motors not listed fall back to the default even/odd bass-mid alternation.
@@ -212,7 +221,7 @@ def run():
         # If the raw frame is silent, snap smoothing to zero immediately
         # so motors stop without the slow exponential decay tail.
         # Attack (rising): use SMOOTHING. Decay (falling): use DECAY for fast stop.
-        if bass < BASS_FLOOR and mid < BASS_FLOOR * 0.5 and beat_hold == 0:
+        if bass < BASS_FLOOR and mid < MID_FLOOR and melody < MELODY_FLOOR and beat_hold == 0:
             smooth_bass   = 0.0
             smooth_mid    = 0.0
             smooth_melody = 0.0
@@ -224,9 +233,9 @@ def run():
             smooth_mid    = alpha_mid    * smooth_mid    + (1 - alpha_mid)    * mid
             smooth_melody = alpha_melody * smooth_melody + (1 - alpha_melody) * melody
 
-        power_bass   = _energy_to_power(smooth_bass,   BASS_FLOOR)
-        power_mid    = _energy_to_power(smooth_mid,    BASS_FLOOR * 0.5)
-        power_melody = _energy_to_power(smooth_melody, BASS_FLOOR * 0.3)
+        power_bass   = _energy_to_power(smooth_bass,   BASS_FLOOR,   BASS_SCALE)
+        power_mid    = _energy_to_power(smooth_mid,    MID_FLOOR,    MID_SCALE)
+        power_melody = _energy_to_power(smooth_melody, MELODY_FLOOR, MELODY_SCALE)
 
         if is_beat:
             beat_hold = beat_hold if beat_hold > BEAT_HOLD_FRAMES else BEAT_HOLD_FRAMES
