@@ -34,6 +34,9 @@ BEAT_HOLD_FRAMES = 6        # frames to sustain beat burst
 BASS_RANGE    = (40, 200)   # Hz → Motor A speed
 MID_RANGE     = (300, 2000) # Hz → Motor B speed
 
+DIRECTION_FLIP_BEATS  = 4   # flip direction every N beats
+TEMPO_CHANGE_THRESHOLD = 0.25  # fractional BPM shift that triggers an immediate flip (0.25 = 25%)
+
 # BLE name the hub advertises — change if connection fails
 HUB_NAME = "Technic Hub"
 # ──────────────────────────────────────────────────────────────────────────
@@ -121,11 +124,16 @@ def run():
 
     smooth_bass = 0.0
     smooth_mid  = 0.0
-    recent_energies = []
-    beat_hold = 0
+    recent_energies  = []
+    beat_hold        = 0
+    direction        = 1       # +1 or -1, applied to all motors
+    beat_count       = 0       # beats since last direction flip
+    last_beat_time   = None
+    beat_intervals   = []      # rolling window of inter-beat intervals for BPM tracking
 
     def audio_callback(indata, frames, time_info, status):
         nonlocal smooth_bass, smooth_mid, beat_hold, recent_energies
+        nonlocal direction, beat_count, last_beat_time, beat_intervals
 
         if _stop.is_set():
             return
@@ -161,24 +169,50 @@ def run():
 
         if is_beat:
             beat_hold = beat_hold if beat_hold > BEAT_HOLD_FRAMES else BEAT_HOLD_FRAMES
+
+            # ── Direction logic ───────────────────────────────────────────
+            now = time.time()
+            if last_beat_time is not None:
+                interval = now - last_beat_time
+                if 0.2 < interval < 3.0:  # ignore spurious gaps
+                    beat_intervals.append(interval)
+                    if len(beat_intervals) > 8:
+                        beat_intervals.pop(0)
+
+                    # Detect sudden tempo shift vs. rolling average
+                    if len(beat_intervals) >= 3:
+                        avg_interval = np.mean(beat_intervals[:-1])
+                        tempo_shift = abs(interval - avg_interval) / avg_interval
+                        if tempo_shift > TEMPO_CHANGE_THRESHOLD:
+                            direction *= -1
+                            beat_count = 0  # reset periodic counter too
+
+            last_beat_time = now
+            beat_count += 1
+            if beat_count >= DIRECTION_FLIP_BEATS:
+                direction *= -1
+                beat_count = 0
+            # ─────────────────────────────────────────────────────────────
+
         if beat_hold > 0:
             power_bass = min(1.0, power_bass + 0.4)
             beat_hold -= 1
 
         powers = [power_bass if sig == "bass" else power_mid for sig in motor_signals]
 
-        # Send to all motors (start_speed is non-blocking)
+        # Send to all motors (start_speed is non-blocking, sign = direction)
         for motor, pwr in zip(motors, powers):
             try:
-                motor.start_speed(pwr * MOTOR_MAX)
+                motor.start_speed(pwr * MOTOR_MAX * direction)
             except Exception:
                 pass
 
+        dir_sym = "▶" if direction == 1 else "◀"
         status_str = "  ".join(f"{l}={p:4.0%}" for l, p in zip(labels, powers))
         if is_beat:
-            print(f"♩ BEAT  │ {status_str}")
+            print(f"♩ BEAT {dir_sym} │ {status_str}")
         else:
-            print(f"        │ {status_str}", end="\r")
+            print(f"       {dir_sym} │ {status_str}", end="\r")
 
     print("Listening… (ESC to stop)")
     try:
