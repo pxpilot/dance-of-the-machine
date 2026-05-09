@@ -233,7 +233,7 @@ def stream():
 
 def start(port: int = PORT):
     def _run():
-        app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False)
+        app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False, threaded=True)
 
     threading.Thread(target=_run, daemon=True).start()
     print(f"Web UI → http://localhost:{port}")
