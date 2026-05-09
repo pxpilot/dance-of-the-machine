@@ -133,14 +133,19 @@ def connect_hub():
 # ── Main loop ──────────────────────────────────────────────────────────────
 
 def _toggle_state_motor(motor, state_pos):
-    """Toggle state motor direction via timed() — works on both Motor and EncodedMotor."""
+    """Toggle state motor via start_power() + sleep + stop — works on all motor types."""
     power = 0.4 * state_pos[0]   # alternates +0.4 / -0.4
     state_pos[0] *= -1
-    # timed() is blocking, so run in a daemon thread
-    threading.Thread(
-        target=lambda: motor.timed(0.4, power),
-        daemon=True,
-    ).start()
+
+    def _run():
+        try:
+            motor.start_power(power)
+            time.sleep(0.4)
+            motor.start_power(0)
+        except Exception:
+            pass
+
+    threading.Thread(target=_run, daemon=True).start()
 
 
 def run():
