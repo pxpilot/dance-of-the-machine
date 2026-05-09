@@ -15,6 +15,7 @@ import numpy as np
 import sounddevice as sd
 from pylgbst.hub import SmartHub
 from pylgbst.peripherals import EncodedMotor
+from pylgbst.comms.cbleak import BleakDriver
 
 # ── Tuning parameters ──────────────────────────────────────────────────────
 SAMPLE_RATE = 44100
@@ -138,7 +139,7 @@ class AudioReactiveController:
     async def connect_hub(self):
         """Connect to the LEGO hub and discover motors."""
         print("Connecting to LEGO hub (make sure it's powered on)…")
-        hub = SmartHub()
+        hub = SmartHub(connection=BleakDriver())
         await asyncio.sleep(2)  # give BLE time to enumerate devices
 
         # Assign motors from whatever ports are active
