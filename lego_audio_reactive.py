@@ -117,9 +117,9 @@ def connect_hub():
         letter = port_letter[port]
         if STATE_MOTOR_PORT and letter == STATE_MOTOR_PORT.upper():
             state_motor = device
-            print(f"  Motor {letter} (port {port}) → state switcher (angled control)")
+            print(f"  Motor {letter} (port {port}) → state switcher (timed control)")
         else:
-            drive_motors.append(device)
+            drive_motors.append((letter, device))  # keep letter alongside motor
             print(f"  Motor {letter} (port {port}) → drive (speed control)")
 
     if not drive_motors and not state_motor:
@@ -133,11 +133,12 @@ def connect_hub():
 # ── Main loop ──────────────────────────────────────────────────────────────
 
 def _toggle_state_motor(motor, state_pos):
-    """Move state motor to +STATE_ANGLE or -STATE_ANGLE, non-blocking via thread."""
-    angle = STATE_ANGLE if state_pos[0] == 1 else -STATE_ANGLE
-    state_pos[0] *= -1  # flip for next call
+    """Toggle state motor direction via timed() — works on both Motor and EncodedMotor."""
+    power = 0.4 * state_pos[0]   # alternates +0.4 / -0.4
+    state_pos[0] *= -1
+    # timed() is blocking, so run in a daemon thread
     threading.Thread(
-        target=lambda: motor.angled(angle, speed_primary=0.3),
+        target=lambda: motor.timed(0.4, power),
         daemon=True,
     ).start()
 
@@ -148,9 +149,11 @@ def run():
         return
 
     # Assign each motor a signal: even index → bass, odd index → mid
-    motor_signals = ["bass" if i % 2 == 0 else "mid" for i in range(len(motors))]
-    labels = [chr(65 + i) for i in range(len(motors))]
-    print(f"  Driving {len(motors)} motors: " + ", ".join(
+    # Unpack real port letters kept alongside each motor
+    labels  = [l for l, _ in motors]
+    devices = [m for _, m in motors]
+    motor_signals = ["bass" if i % 2 == 0 else "mid" for i in range(len(devices))]
+    print(f"  Driving {len(devices)} motors: " + ", ".join(
         f"{l}={s}" for l, s in zip(labels, motor_signals)
     ))
 
@@ -244,7 +247,7 @@ def run():
         powers = [power_bass if sig == "bass" else power_mid for sig in motor_signals]
 
         # Send to all motors (start_speed is non-blocking, sign = direction)
-        for motor, pwr in zip(motors, powers):
+        for motor, pwr in zip(devices, powers):
             try:
                 motor.start_speed(pwr * MOTOR_MAX * direction)
             except Exception:
@@ -270,7 +273,7 @@ def run():
         _stop.set()
 
     # Clean stop
-    for motor in motors:
+    for motor in devices:
         try:
             motor.start_speed(0)
         except Exception:
