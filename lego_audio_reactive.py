@@ -38,6 +38,12 @@ MID_RANGE     = (300, 2000) # Hz → Motor B speed
 DIRECTION_FLIP_BEATS  = 2   # flip direction every N beats
 TEMPO_CHANGE_THRESHOLD = 0.12  # fractional BPM shift that triggers an immediate flip (0.12 = 12%)
 
+# State-switching motor — set to 'A', 'B', 'C', or 'D' (or None to disable).
+# This motor uses angled position commands instead of continuous speed.
+# It toggles between +STATE_ANGLE and -STATE_ANGLE degrees on every direction flip.
+STATE_MOTOR_PORT  = 'D'    # port letter of the gear/clutch/state motor
+STATE_ANGLE       = 90     # degrees to rotate each toggle
+
 # BLE name the hub advertises — change if connection fails
 HUB_NAME = "Technic Hub"
 # ──────────────────────────────────────────────────────────────────────────
@@ -86,7 +92,7 @@ def connect_hub():
     except Exception as e:
         print(f"Connection failed: {e}")
         print("Tip: try changing HUB_NAME at the top of the script")
-        return None, [],
+        return None, [], None
 
     print("Connected! Waiting for motors to attach…")
     for _ in range(100):  # up to 10 s
@@ -95,22 +101,45 @@ def connect_hub():
             break
         time.sleep(0.1)
 
-    motors = [p for p in hub.peripherals.values() if isinstance(p, Motor)]
-    if not motors:
+    # Port number → letter (Technic Hub: ports 0-3 = A-D)
+    port_map = {port: chr(65 + port) for port in hub.peripherals}
+    state_motor = None
+    drive_motors = []
+
+    for port, device in hub.peripherals.items():
+        if not isinstance(device, Motor):
+            continue
+        letter = port_map.get(port, f"?{port}")
+        if STATE_MOTOR_PORT and letter == STATE_MOTOR_PORT.upper():
+            state_motor = device
+            print(f"  Motor {letter} → state switcher (angled control)")
+        else:
+            drive_motors.append(device)
+            print(f"  Motor {letter} → drive (speed control)")
+
+    if not drive_motors and not state_motor:
         print("No motors found — check that motors are plugged into the hub.")
         print(f"Peripherals detected: {hub.peripherals}")
-        return hub, []
+        return hub, [], None
 
-    for i, m in enumerate(motors):
-        print(f"  Motor {chr(65+i)} ready")
-    return hub, motors
+    return hub, drive_motors, state_motor
 
 
 # ── Main loop ──────────────────────────────────────────────────────────────
 
+def _toggle_state_motor(motor, state_pos):
+    """Move state motor to +STATE_ANGLE or -STATE_ANGLE, non-blocking via thread."""
+    angle = STATE_ANGLE if state_pos[0] == 1 else -STATE_ANGLE
+    state_pos[0] *= -1  # flip for next call
+    threading.Thread(
+        target=lambda: motor.angled(angle, speed_primary=0.3),
+        daemon=True,
+    ).start()
+
+
 def run():
-    hub, motors = connect_hub()
-    if not motors:
+    hub, motors, state_motor = connect_hub()
+    if not motors and not state_motor:
         return
 
     # Assign each motor a signal: even index → bass, odd index → mid
@@ -131,6 +160,7 @@ def run():
     beat_count       = 0       # beats since last direction flip
     last_beat_time   = None
     beat_intervals   = []      # rolling window of inter-beat intervals for BPM tracking
+    state_pos        = [1]     # mutable so _toggle_state_motor can flip it (1 or -1)
 
     def audio_callback(indata, frames, time_info, status):
         nonlocal smooth_bass, smooth_mid, beat_hold, recent_energies
@@ -190,12 +220,16 @@ def run():
                         if tempo_shift > TEMPO_CHANGE_THRESHOLD:
                             direction *= -1
                             beat_count = 0  # reset periodic counter too
+                            if state_motor:
+                                _toggle_state_motor(state_motor, state_pos)
 
             last_beat_time = now
             beat_count += 1
             if beat_count >= DIRECTION_FLIP_BEATS:
                 direction *= -1
                 beat_count = 0
+                if state_motor:
+                    _toggle_state_motor(state_motor, state_pos)
             # ─────────────────────────────────────────────────────────────
 
         if beat_hold > 0:
@@ -234,6 +268,11 @@ def run():
     for motor in motors:
         try:
             motor.start_speed(0)
+        except Exception:
+            pass
+    if state_motor:
+        try:
+            state_motor.start_power(0)
         except Exception:
             pass
     if hub:
