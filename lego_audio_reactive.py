@@ -109,8 +109,12 @@ def run():
     if not motors:
         return
 
-    motor_a = motors[0]
-    motor_b = motors[1] if len(motors) > 1 else None
+    # Assign each motor a signal: even index → bass, odd index → mid
+    motor_signals = ["bass" if i % 2 == 0 else "mid" for i in range(len(motors))]
+    labels = [chr(65 + i) for i in range(len(motors))]
+    print(f"  Driving {len(motors)} motors: " + ", ".join(
+        f"{l}={s}" for l, s in zip(labels, motor_signals)
+    ))
 
     # Start ESC listener
     threading.Thread(target=_keyboard_thread, daemon=True).start()
@@ -152,27 +156,29 @@ def run():
             smooth_bass = SMOOTHING * smooth_bass + (1 - SMOOTHING) * bass
             smooth_mid  = SMOOTHING * smooth_mid  + (1 - SMOOTHING) * mid
 
-        power_a = _energy_to_power(smooth_bass, BASS_FLOOR)
-        power_b = _energy_to_power(smooth_mid,  BASS_FLOOR * 0.5)
+        power_bass = _energy_to_power(smooth_bass, BASS_FLOOR)
+        power_mid  = _energy_to_power(smooth_mid,  BASS_FLOOR * 0.5)
 
         if is_beat:
             beat_hold = beat_hold if beat_hold > BEAT_HOLD_FRAMES else BEAT_HOLD_FRAMES
         if beat_hold > 0:
-            power_a = min(1.0, power_a + 0.4)
+            power_bass = min(1.0, power_bass + 0.4)
             beat_hold -= 1
 
-        # Send motor commands (start_speed is non-blocking)
-        try:
-            motor_a.start_speed(power_a * MOTOR_MAX)
-            if motor_b:
-                motor_b.start_speed(power_b * MOTOR_MAX)
-        except Exception:
-            pass
+        powers = [power_bass if sig == "bass" else power_mid for sig in motor_signals]
 
+        # Send to all motors (start_speed is non-blocking)
+        for motor, pwr in zip(motors, powers):
+            try:
+                motor.start_speed(pwr * MOTOR_MAX)
+            except Exception:
+                pass
+
+        status_str = "  ".join(f"{l}={p:4.0%}" for l, p in zip(labels, powers))
         if is_beat:
-            print(f"♩ BEAT  │ A={power_a:4.0%}  B={power_b:4.0%}")
+            print(f"♩ BEAT  │ {status_str}")
         else:
-            print(f"        │ A={power_a:4.0%}  B={power_b:4.0%}", end="\r")
+            print(f"        │ {status_str}", end="\r")
 
     print("Listening… (ESC to stop)")
     try:
@@ -187,12 +193,11 @@ def run():
         _stop.set()
 
     # Clean stop
-    try:
-        motor_a.start_speed(0)
-        if motor_b:
-            motor_b.start_speed(0)
-    except Exception:
-        pass
+    for motor in motors:
+        try:
+            motor.start_speed(0)
+        except Exception:
+            pass
     if hub:
         hub.connection.disconnect()
     print("Done.")
