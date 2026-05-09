@@ -101,21 +101,26 @@ def connect_hub():
             break
         time.sleep(0.1)
 
-    # Port number → letter (Technic Hub: ports 0-3 = A-D)
-    port_map = {port: chr(65 + port) for port in hub.peripherals}
+    # Print raw port assignments so we can verify the A-D mapping
+    print("  Raw port map:")
+    motor_ports = sorted(p for p, d in hub.peripherals.items() if isinstance(d, Motor))
+    for i, port in enumerate(motor_ports):
+        print(f"    port {port} → letter {chr(65 + i)} (device: {type(hub.peripherals[port]).__name__})")
+
+    # Map port number → letter by sorted order (first motor port = A, second = B, …)
+    port_letter = {port: chr(65 + i) for i, port in enumerate(motor_ports)}
     state_motor = None
     drive_motors = []
 
-    for port, device in hub.peripherals.items():
-        if not isinstance(device, Motor):
-            continue
-        letter = port_map.get(port, f"?{port}")
+    for port in motor_ports:
+        device = hub.peripherals[port]
+        letter = port_letter[port]
         if STATE_MOTOR_PORT and letter == STATE_MOTOR_PORT.upper():
             state_motor = device
-            print(f"  Motor {letter} → state switcher (angled control)")
+            print(f"  Motor {letter} (port {port}) → state switcher (angled control)")
         else:
             drive_motors.append(device)
-            print(f"  Motor {letter} → drive (speed control)")
+            print(f"  Motor {letter} (port {port}) → drive (speed control)")
 
     if not drive_motors and not state_motor:
         print("No motors found — check that motors are plugged into the hub.")
