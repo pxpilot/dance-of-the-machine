@@ -145,6 +145,8 @@ def run():
                for i, l in enumerate(labels)]
     print(f"  Driving: " + ", ".join(f"{l}={s}" for l, s in zip(labels, signals)))
 
+    # Register motors so web UI test button can drive them directly
+    cfg.register_devices(devices, state_motor)
     # Seed telemetry so web UI builds motor meters immediately (before audio starts)
     cfg.set_telemetry({"levels": {l: 0.0 for l in labels}, "direction": 1,
                        "is_beat": False, "bpm": 0.0})

@@ -31,6 +31,23 @@ params = {
     "melody_scale":            10.0,
 }
 
+# ── Motor device references (set after hub connects, used by web UI test) ──
+_devices    = []   # drive motor objects
+_state_dev  = None
+
+
+def register_devices(devices, state_motor=None):
+    global _devices, _state_dev
+    with _lock:
+        _devices   = list(devices)
+        _state_dev = state_motor
+
+
+def get_devices():
+    with _lock:
+        return list(_devices), _state_dev
+
+
 # ── Live telemetry (written by audio loop, read by web UI) ─────────────────
 _telemetry = {
     "levels":    {},   # {"A": 0.4, "B": 0.2, "D": 0.8}
