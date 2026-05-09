@@ -1,0 +1,3 @@
+pylgbst[bleak]
+sounddevice
+numpy
