@@ -26,7 +26,8 @@ from pylgbst.comms.cbleak import BleakDriver
 # ── Tuning ─────────────────────────────────────────────────────────────────
 SAMPLE_RATE   = 44100
 CHUNK_SIZE    = 2048        # ~46ms per frame
-SMOOTHING     = 0.3         # 0=instant, 1=frozen
+SMOOTHING     = 0.3         # attack smoothing: 0=instant, 1=frozen (rise time)
+DECAY         = 0.05        # decay smoothing: lower = faster stop after sound ends (0.05 ≈ 2 frames)
 MOTOR_MAX     = 0.8         # max motor power (0.0–1.0)
 BASS_FLOOR    = 0.01        # silence threshold
 BEAT_THRESHOLD = 1.8        # onset energy multiplier to call a beat
@@ -157,12 +158,15 @@ def run():
         # Smooth + map to power.
         # If the raw frame is silent, snap smoothing to zero immediately
         # so motors stop without the slow exponential decay tail.
+        # Attack (rising): use SMOOTHING. Decay (falling): use DECAY for fast stop.
         if bass < BASS_FLOOR and mid < BASS_FLOOR * 0.5 and beat_hold == 0:
             smooth_bass = 0.0
             smooth_mid  = 0.0
         else:
-            smooth_bass = SMOOTHING * smooth_bass + (1 - SMOOTHING) * bass
-            smooth_mid  = SMOOTHING * smooth_mid  + (1 - SMOOTHING) * mid
+            alpha_bass = SMOOTHING if bass >= smooth_bass else DECAY
+            alpha_mid  = SMOOTHING if mid  >= smooth_mid  else DECAY
+            smooth_bass = alpha_bass * smooth_bass + (1 - alpha_bass) * bass
+            smooth_mid  = alpha_mid  * smooth_mid  + (1 - alpha_mid)  * mid
 
         power_bass = _energy_to_power(smooth_bass, BASS_FLOOR)
         power_mid  = _energy_to_power(smooth_mid,  BASS_FLOOR * 0.5)
