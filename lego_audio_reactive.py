@@ -26,17 +26,17 @@ from pylgbst.comms.cbleak import BleakDriver
 # ── Tuning ─────────────────────────────────────────────────────────────────
 SAMPLE_RATE   = 44100
 CHUNK_SIZE    = 2048        # ~46ms per frame
-SMOOTHING     = 0.3         # attack smoothing: 0=instant, 1=frozen (rise time)
+SMOOTHING     = 0.7         # attack smoothing: 0=instant, 1=frozen (rise time)
 DECAY         = 0.05        # decay smoothing: lower = faster stop after sound ends (0.05 ≈ 2 frames)
-MOTOR_MAX     = 0.8         # max motor power (0.0–1.0)
+MOTOR_MAX     = 0.4         # max motor power (0.0–1.0)
 BASS_FLOOR    = 0.01        # silence threshold
 BEAT_THRESHOLD = 1.8        # onset energy multiplier to call a beat
 BEAT_HOLD_FRAMES = 6        # frames to sustain beat burst
 BASS_RANGE    = (40, 200)   # Hz → Motor A speed
 MID_RANGE     = (300, 2000) # Hz → Motor B speed
 
-DIRECTION_FLIP_BEATS  = 4   # flip direction every N beats
-TEMPO_CHANGE_THRESHOLD = 0.25  # fractional BPM shift that triggers an immediate flip (0.25 = 25%)
+DIRECTION_FLIP_BEATS  = 2   # flip direction every N beats
+TEMPO_CHANGE_THRESHOLD = 0.12  # fractional BPM shift that triggers an immediate flip (0.12 = 12%)
 
 # BLE name the hub advertises — change if connection fails
 HUB_NAME = "Technic Hub"
