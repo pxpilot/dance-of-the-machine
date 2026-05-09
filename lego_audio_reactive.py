@@ -32,8 +32,13 @@ MOTOR_MAX     = 0.4         # max motor power (0.0–1.0)
 BASS_FLOOR    = 0.01        # silence threshold
 BEAT_THRESHOLD = 1.8        # onset energy multiplier to call a beat
 BEAT_HOLD_FRAMES = 6        # frames to sustain beat burst
-BASS_RANGE    = (40, 200)   # Hz → Motor A speed
-MID_RANGE     = (300, 2000) # Hz → Motor B speed
+BASS_RANGE    = (40, 200)     # Hz — kick, bass guitar
+MID_RANGE     = (300, 2000)   # Hz — snare, chords, vocals
+MELODY_RANGE  = (1000, 8000)  # Hz — lead melody, synth, high strings
+
+# Per-motor signal override. Keys are port letters; values are "bass", "mid", or "melody".
+# Motors not listed fall back to the default even/odd bass-mid alternation.
+MOTOR_SIGNAL  = {'D': 'melody'}
 
 DIRECTION_FLIP_BEATS  = 2   # flip direction every N beats
 TEMPO_CHANGE_THRESHOLD = 0.12  # fractional BPM shift that triggers an immediate flip (0.12 = 12%)
@@ -153,11 +158,14 @@ def run():
     if not motors and not state_motor:
         return
 
-    # Assign each motor a signal: even index → bass, odd index → mid
     # Unpack real port letters kept alongside each motor
     labels  = [l for l, _ in motors]
     devices = [m for _, m in motors]
-    motor_signals = ["bass" if i % 2 == 0 else "mid" for i in range(len(devices))]
+    # Default: even index → bass, odd index → mid; MOTOR_SIGNAL overrides per letter
+    motor_signals = [
+        MOTOR_SIGNAL.get(l, "bass" if i % 2 == 0 else "mid")
+        for i, l in enumerate(labels)
+    ]
     print(f"  Driving {len(devices)} motors: " + ", ".join(
         f"{l}={s}" for l, s in zip(labels, motor_signals)
     ))
@@ -165,8 +173,9 @@ def run():
     # Start ESC listener
     threading.Thread(target=_keyboard_thread, daemon=True).start()
 
-    smooth_bass = 0.0
-    smooth_mid  = 0.0
+    smooth_bass   = 0.0
+    smooth_mid    = 0.0
+    smooth_melody = 0.0
     recent_energies  = []
     beat_hold        = 0
     direction        = 1       # +1 or -1, applied to all motors
@@ -176,7 +185,7 @@ def run():
     state_pos        = [1]     # mutable so _toggle_state_motor can flip it (1 or -1)
 
     def audio_callback(indata, frames, time_info, status):
-        nonlocal smooth_bass, smooth_mid, beat_hold, recent_energies
+        nonlocal smooth_bass, smooth_mid, smooth_melody, beat_hold, recent_energies
         nonlocal direction, beat_count, last_beat_time, beat_intervals
 
         if _stop.is_set():
@@ -187,9 +196,10 @@ def run():
         fft  = np.abs(np.fft.rfft(windowed))
         freqs = np.fft.rfftfreq(len(mono), d=1.0 / SAMPLE_RATE)
 
-        bass  = _band_energy(fft, freqs, *BASS_RANGE)
-        mid   = _band_energy(fft, freqs, *MID_RANGE)
-        total = _band_energy(fft, freqs, 20, 20000)
+        bass   = _band_energy(fft, freqs, *BASS_RANGE)
+        mid    = _band_energy(fft, freqs, *MID_RANGE)
+        melody = _band_energy(fft, freqs, *MELODY_RANGE)
+        total  = _band_energy(fft, freqs, 20, 20000)
 
         # Beat onset detection
         recent_energies.append(total)
@@ -203,16 +213,20 @@ def run():
         # so motors stop without the slow exponential decay tail.
         # Attack (rising): use SMOOTHING. Decay (falling): use DECAY for fast stop.
         if bass < BASS_FLOOR and mid < BASS_FLOOR * 0.5 and beat_hold == 0:
-            smooth_bass = 0.0
-            smooth_mid  = 0.0
+            smooth_bass   = 0.0
+            smooth_mid    = 0.0
+            smooth_melody = 0.0
         else:
-            alpha_bass = SMOOTHING if bass >= smooth_bass else DECAY
-            alpha_mid  = SMOOTHING if mid  >= smooth_mid  else DECAY
-            smooth_bass = alpha_bass * smooth_bass + (1 - alpha_bass) * bass
-            smooth_mid  = alpha_mid  * smooth_mid  + (1 - alpha_mid)  * mid
+            alpha_bass   = SMOOTHING if bass   >= smooth_bass   else DECAY
+            alpha_mid    = SMOOTHING if mid    >= smooth_mid    else DECAY
+            alpha_melody = SMOOTHING if melody >= smooth_melody else DECAY
+            smooth_bass   = alpha_bass   * smooth_bass   + (1 - alpha_bass)   * bass
+            smooth_mid    = alpha_mid    * smooth_mid    + (1 - alpha_mid)    * mid
+            smooth_melody = alpha_melody * smooth_melody + (1 - alpha_melody) * melody
 
-        power_bass = _energy_to_power(smooth_bass, BASS_FLOOR)
-        power_mid  = _energy_to_power(smooth_mid,  BASS_FLOOR * 0.5)
+        power_bass   = _energy_to_power(smooth_bass,   BASS_FLOOR)
+        power_mid    = _energy_to_power(smooth_mid,    BASS_FLOOR * 0.5)
+        power_melody = _energy_to_power(smooth_melody, BASS_FLOOR * 0.3)
 
         if is_beat:
             beat_hold = beat_hold if beat_hold > BEAT_HOLD_FRAMES else BEAT_HOLD_FRAMES
@@ -249,7 +263,8 @@ def run():
             power_bass = min(1.0, power_bass + 0.4)
             beat_hold -= 1
 
-        powers = [power_bass if sig == "bass" else power_mid for sig in motor_signals]
+        sig_map = {"bass": power_bass, "mid": power_mid, "melody": power_melody}
+        powers = [sig_map[sig] for sig in motor_signals]
 
         # Send to all motors (start_speed is non-blocking, sign = direction)
         for motor, pwr in zip(devices, powers):
