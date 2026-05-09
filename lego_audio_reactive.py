@@ -41,7 +41,7 @@ TEMPO_CHANGE_THRESHOLD = 0.12  # fractional BPM shift that triggers an immediate
 # State-switching motor — set to 'A', 'B', 'C', or 'D' (or None to disable).
 # This motor uses angled position commands instead of continuous speed.
 # It toggles between +STATE_ANGLE and -STATE_ANGLE degrees on every direction flip.
-STATE_MOTOR_PORT  = 'D'    # port letter of the gear/clutch/state motor
+STATE_MOTOR_PORT  = 'C'    # port letter of the gear/clutch/state motor
 STATE_ANGLE       = 90     # degrees to rotate each toggle
 
 # BLE name the hub advertises — change if connection fails
